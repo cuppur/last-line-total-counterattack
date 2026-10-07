@@ -2,6 +2,10 @@
 
 纯静态浏览器 Canvas 生存射击游戏，支持桌面和手机，无需后端、数据库或外部游戏资源。
 
+在线游玩：[last-line-total-counterattack.lovable.app](https://last-line-total-counterattack.lovable.app)
+
+Lovable 项目：[最后防线 · 全面反击](https://lovable.dev/projects/b83ae7fa-fea4-4af6-a33f-d5f410d2d26d)。线上原样托管的游戏文件路径为 `public/game/index.html`，首页全视口加载该游戏。
+
 ## 游玩
 
 直接打开 `index.html`，或运行 `npm run serve` 后访问 `http://localhost:8080`。
