@@ -1,6 +1,6 @@
 {
   "name": "last-line-total-counterattack",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "private": true,
   "description": "最后防线 · 全面反击：纯静态 Canvas 生存射击游戏",
   "scripts": {

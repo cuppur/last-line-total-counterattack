@@ -4,12 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(root, fs.readdirSync(root).find(f => f.endsWith('.html'))), 'utf8');
+const html = fs.readFileSync(path.join(root, '最后防线_全面反击_v2-8.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 // Exercise the actual game model without DOM, audio, or animation-frame timing.
 const context = vm.createContext({});
-vm.runInContext(script.slice(script.indexOf('const W='), script.indexOf('class Renderer')) + '\nglobalThis.model={Battle,WEAPONS};', context);
-const { Battle, WEAPONS } = context.model;
+vm.runInContext(script.slice(script.indexOf('const W='), script.indexOf('class Renderer')) + '\nglobalThis.model={Battle,WEAPONS,weaponStats};', context);
+const { Battle, WEAPONS, weaponStats } = context.model;
 const ids = WEAPONS.map(w => w.id);
 const create = (variant = 'normal', difficulty = 'normal') => new Battle(['rifle', 'laser', 'tesla'], { mode: 'survival', survivalVariant: variant, difficulty }, () => .5);
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-8, `${a} != ${b}`);
@@ -70,13 +70,13 @@ saved.state = 'reward'; saved.coins = 1000;
 assert.ok(saved.boost(11));
 assert.equal(saved.level(ids[11]), 2);
 saved.levels[ids[11]] = 5;
-assert.ok(saved.evolve(ids[11], 1));
+assert.equal(saved.evolutionStage(ids[11]), 1);
 saved.rewardPoints = 2; saved.time = 125; saved.rewardOffer = saved.upgrades();
 const restored = Battle.restore(JSON.parse(JSON.stringify(saved.snapshot())));
 assert.equal(restored.allWeapons, true);
 assert.equal(restored.loadout.length, 12);
 assert.equal(restored.level(ids[11]), 5);
-assert.equal(restored.evolutions[ids[11]], 1);
+assert.equal(restored.evolutionStage(ids[11]), 1);
 assert.equal(restored.rewardPoints, 2);
 assert.equal(restored.state, 'reward');
 assert.equal(restored.strengthGrowthRate, 1.5);
@@ -138,4 +138,92 @@ assert.equal(partial.skillUses.mine, 1);
 assert.equal(partial.skillCharge.ice, 99); assert.equal(partial.skillCharge.laser, 100);
 xpNormal.spawn('bossCrusher'); xpNormal.skillCharge.rifle = 100;
 assert.equal(xpNormal.skillAll(), 0); assert.equal(xpNormal.skillCharge.rifle, 100);
-console.log('PASS: 12 weapons, 10x spawning, 1.5x growth, bulk skills, 40% XP, upgrades/evolution, checkpoints, legacy modes.');
+// Automatic stages retain both existing effects; querying stats never compounds bonuses.
+const damageMultipliers = { laser:1.3, tesla:1.35, ice:1.4, rocket:1.5, flame:1.2, blackhole:1.2, acid:1.4, drone:1.4, scatter:1.45, mortar:1.3, mine:1.25 };
+for (const level of [4, 5, 19, 20, 21]) {
+  const b = create('allWeapons');
+  const stage = level >= 20 ? 2 : level >= 5 ? 1 : 0;
+  for (const id of ids) {
+    b.levels[id] = level;
+    assert.equal(b.evolutionStage(id), stage);
+    const expected = weaponStats(id, level);
+    if (stage >= 1) {
+      if (['ice','blackhole'].includes(id)) expected.radius *= 1.35;
+      if (['acid','mine'].includes(id)) expected.radius *= 1.4;
+      if (id === 'tesla') expected.chain += 3;
+      if (id === 'ice') expected.slow += 1;
+      if (id === 'rifle') expected.damage *= 1.2;
+    }
+    if (stage >= 2) {
+      expected.damage *= damageMultipliers[id] || 1;
+      if (id === 'laser') expected.width *= 1.5;
+      if (id === 'rocket') expected.radius *= .85;
+      if (id === 'flame') expected.range += 100;
+      if (id === 'blackhole') expected.duration += 2;
+      if (id === 'acid') expected.duration += 1;
+      if (id === 'mortar') expected.radius *= 1.3;
+      if (id === 'drone') expected.interval /= 1.15;
+    }
+    for (const actual of [b.statsFor(id), b.statsFor(id)]) {
+      for (const key of Object.keys(expected)) close(actual[key], expected[key]);
+    }
+  }
+  b.spawn('bossCrusher', 210, 390).hp = 1e12;
+  for (const id of ids) {
+    b.shots = []; b.pools = []; b.effects = [];
+    b.fire(id);
+    if (id === 'rifle') assert.equal(b.shots.length, stage === 2 ? 5 : stage === 1 ? 3 : 1);
+    if (id === 'laser') {
+      assert.equal(b.effects.filter(e => e.kind === 'beam').length, stage ? 4 : 1);
+      b.effects.forEach(e => close(e.width, b.statsFor(id).width));
+    }
+    if (id === 'rocket') {
+      assert.equal(b.shots.length, stage ? 2 : 1);
+      b.shots.forEach(s => { close(s.damage, b.statsFor(id).damage * (stage ? .75 : 1)); close(s.blastRadius, b.statsFor(id).radius); });
+    }
+    if (['drone','scatter'].includes(id)) assert.ok(b.shots.every(s => s.homing === (stage >= 1)));
+    if (id === 'scatter') assert.equal(b.shots.length, stage ? 7 : 5);
+    if (['mortar','mine'].includes(id)) assert.equal(b.pools.length, stage ? 2 : 1);
+  }
+}
+// Stage two keeps the wide flame cone and doubled black-hole pull from stage one.
+for (const level of [4,5,20]) {
+  const flame = create('allWeapons'); flame.levels.flame = level;
+  flame.aim = {x:210,y:380}; flame.spawn('walker',210,380).hp = 1e6;
+  const side = flame.spawn('walker',403,450); const before = side.hp;
+  flame.fire('flame'); assert.equal(side.hp < before, level >= 5);
+  const gravity = create('allWeapons'); gravity.levels.blackhole = level;
+  gravity.spawnClock = Infinity; gravity.fire = () => {};
+  const e = gravity.spawn('walker',250,300); e.speed = 0;
+  gravity.pools.push({id:'blackhole',x:210,y:300,r:100,life:10,tick:100,damage:0});
+  gravity.update(.04); close(250-e.x, 32*.04*(level >= 5 ? 2 : 1));
+}
+// Ordinary upgrades and effective slot/wave levels trigger stages without selection.
+for (const threshold of [5, 20]) {
+  const b = create('allWeapons'); b.levels.mine = threshold - 1;
+  assert.equal(b.evolutionStage('mine'), threshold === 5 ? 0 : 1);
+  b.improve('mine'); assert.equal(b.evolutionStage('mine'), threshold === 5 ? 1 : 2);
+  const slot = create(); slot.slotLevels[0] = threshold;
+  assert.equal(slot.evolutionStage('rifle'), threshold === 5 ? 1 : 2);
+  const wave = new Battle(['rifle','laser','tesla'], {mode:'endless'});
+  wave.wave = (threshold - 1) * 5; wave.startWave();
+  assert.equal(wave.evolutionStage('rifle'), threshold === 5 ? 1 : 2);
+}
+// Old mutually exclusive choices become level-based stages, keeping levels and resources.
+for (const level of [4,5,19,20,25]) for (const oldPath of [undefined,0,1]) {
+  const b = create('allWeapons'); ids.forEach(id => b.levels[id] = level);
+  const snapshot = JSON.parse(JSON.stringify(b.snapshot()));
+  snapshot.saveVersion = 11; snapshot.evolutions = Object.fromEntries(ids.map(id => [id,oldPath]));
+  snapshot.rewardXp = 80; snapshot.coins = 1200;
+  const migrated = Battle.restore(snapshot);
+  ids.forEach(id => {
+    assert.equal(migrated.level(id), level);
+    assert.equal(migrated.evolutionStage(id), level >= 20 ? 2 : level >= 5 ? 1 : 0);
+    close(migrated.statsFor(id).damage, b.statsFor(id).damage);
+  });
+  assert.equal(migrated.coins, 1200); assert.equal(migrated.rewardXp, 80);
+  assert.equal(migrated.saveVersion, 12);
+  assert.equal('evolutions' in migrated.snapshot(), false);
+}
+assert.equal(html.includes('data-evolve='), false);
+console.log('PASS: 12 weapons, 10x spawning, 1.5x growth, bulk skills, 40% XP, automatic stacked Lv.5/Lv.20 evolutions, checkpoints, legacy modes.');
